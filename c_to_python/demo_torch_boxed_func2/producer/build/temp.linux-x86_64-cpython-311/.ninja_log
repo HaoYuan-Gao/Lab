@@ -1,0 +1,7 @@
+# ninja log v6
+0	12128	1769608058818967243	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/producer/build/temp.linux-x86_64-cpython-311/producer.o	d6a8b83fc4ed5d4d
+8	12360	1769608864237674178	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/producer/build/temp.linux-x86_64-cpython-311/producer.o	d6a8b83fc4ed5d4d
+8	10928	1769611018007242961	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/producer/build/temp.linux-x86_64-cpython-311/producer.o	d6a8b83fc4ed5d4d
+12	11352	1769611743103514851	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/producer/build/temp.linux-x86_64-cpython-311/producer.o	d6a8b83fc4ed5d4d
+15	11329	1769655470230041200	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/producer/build/temp.linux-x86_64-cpython-311/producer.o	d6a8b83fc4ed5d4d
+9	12355	1770731257248685395	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/producer/build/temp.linux-x86_64-cpython-311/producer.o	d6a8b83fc4ed5d4d

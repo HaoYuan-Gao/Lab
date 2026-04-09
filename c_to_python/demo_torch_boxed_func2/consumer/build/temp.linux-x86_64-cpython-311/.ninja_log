@@ -1,0 +1,19 @@
+# ninja log v6
+0	11744	1769608596086692323	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+8	11986	1769609176869408404	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+9	11634	1769609432002707501	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+8	11702	1769609529466997417	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+8	11828	1769609635487453915	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+7	10580	1769609727113830041	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+7	10430	1769609877837198104	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+7	10295	1769610130504973387	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+6	10213	1769610356586464206	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+7	11143	1769610525838040954	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+8	10374	1769610757347777218	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+7	10825	1769610926752201484	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+9	10605	1769611769887285891	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+34	12077	1769655288217789186	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+17	11695	1769658988538243398	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+7	10023	1770731412336784670	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+7	11006	1770731613708878541	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
+7	11322	1770731675720890863	/home/haoyuangao/pinned/cuda_learing/torchclass_demo/consumer/build/temp.linux-x86_64-cpython-311/consumer.o	1f2a86c0364b55ce
