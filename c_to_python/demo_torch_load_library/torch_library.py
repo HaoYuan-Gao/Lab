@@ -268,6 +268,27 @@ def _cuda_add_out_impl(
     return out
 
 
+# fake 实现：只做 shape / dtype / device 元信息推导
+def add_fake(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    if x.shape != y.shape:
+        raise RuntimeError(f"shape mismatch: {tuple(x.shape)} vs {tuple(y.shape)}")
+    if x.dtype != torch.float32 or y.dtype != torch.float32:
+        raise RuntimeError("fake add only supports float32 in this demo")
+    return torch.empty_like(x)
+
+
+def add_out_fake(x: torch.Tensor, y: torch.Tensor, out: torch.Tensor) -> torch.Tensor:
+    if x.shape != y.shape:
+        raise RuntimeError(f"shape mismatch: {tuple(x.shape)} vs {tuple(y.shape)}")
+    if out.shape != x.shape:
+        raise RuntimeError(
+            f"out shape mismatch: expected {tuple(x.shape)}, got {tuple(out.shape)}"
+        )
+    if x.dtype != torch.float32 or y.dtype != torch.float32 or out.dtype != torch.float32:
+        raise RuntimeError("fake add_out only supports float32 in this demo")
+    return out
+
+
 # ============================================================
 # 注册逻辑：define + impl + fake
 # ============================================================
@@ -282,43 +303,16 @@ def load() -> None:
     _LIB_DEF.define("add_out(Tensor x, Tensor y, Tensor(a!) out) -> Tensor(a!)")
 
     # CPU backend
-    @torch.library.impl("mylib::add", "cpu")
-    def add_cpu(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        return _cpu_add_impl(x, y)
-
-    @torch.library.impl("mylib::add_out", "cpu")
-    def add_out_cpu(x: torch.Tensor, y: torch.Tensor, out: torch.Tensor) -> torch.Tensor:
-        return _cpu_add_out_impl(x, y, out)
+    _LIB_DEF.impl("add", _cpu_add_impl, "CPU")
+    _LIB_DEF.impl("add_out", _cpu_add_out_impl, "CPU")
 
     # CUDA backend
-    @torch.library.impl("mylib::add", "cuda")
-    def add_cuda(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        return _cuda_add_impl(x, y, sync=False)
+    _LIB_DEF.impl("add", _cuda_add_impl, "CUDA")
+    _LIB_DEF.impl("add_out", _cuda_add_out_impl, "CUDA")
 
-    @torch.library.impl("mylib::add_out", "cuda")
-    def add_out_cuda(x: torch.Tensor, y: torch.Tensor, out: torch.Tensor) -> torch.Tensor:
-        return _cuda_add_out_impl(x, y, out, sync=False)
-
-    # fake 实现：只做 shape / dtype / device 元信息推导
-    @torch.library.register_fake("mylib::add")
-    def add_fake(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        if x.shape != y.shape:
-            raise RuntimeError(f"shape mismatch: {tuple(x.shape)} vs {tuple(y.shape)}")
-        if x.dtype != torch.float32 or y.dtype != torch.float32:
-            raise RuntimeError("fake add only supports float32 in this demo")
-        return torch.empty_like(x)
-
-    @torch.library.register_fake("mylib::add_out")
-    def add_out_fake(x: torch.Tensor, y: torch.Tensor, out: torch.Tensor) -> torch.Tensor:
-        if x.shape != y.shape:
-            raise RuntimeError(f"shape mismatch: {tuple(x.shape)} vs {tuple(y.shape)}")
-        if out.shape != x.shape:
-            raise RuntimeError(
-                f"out shape mismatch: expected {tuple(x.shape)}, got {tuple(out.shape)}"
-            )
-        if x.dtype != torch.float32 or y.dtype != torch.float32 or out.dtype != torch.float32:
-            raise RuntimeError("fake add_out only supports float32 in this demo")
-        return out
+    # Fake backend
+    _LIB_DEF._register_fake("add", add_fake)
+    _LIB_DEF._register_fake("add_out", add_out_fake)
 
     _LOADED = True
 

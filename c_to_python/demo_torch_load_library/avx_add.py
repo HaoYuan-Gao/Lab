@@ -1,7 +1,7 @@
 import ctypes
 import torch
 
-lib = ctypes.CDLL("./libavx_add.so")
+lib = ctypes.CDLL("./lib/libavx_add.so")
 
 lib.sample_add_avx.argtypes = [
     ctypes.c_void_p,  # x
