@@ -1,0 +1,12 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "gtensor"
+version = "0.1.0"
+description = "A small extensible GTensor prototype using DLPack for PyTorch interop"
+requires-python = ">=3.9"
+
+[tool.scikit-build]
+wheel.packages = ["python/gtensor"]
