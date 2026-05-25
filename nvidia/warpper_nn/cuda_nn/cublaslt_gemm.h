@@ -80,8 +80,8 @@ private:
 
     struct PlanEntry;
 
-    int device_id_ = -1;
     CublasLtGemmConfig cfg_;
+    int device_id_ = -1;
     cudaStream_t stream_ = nullptr;
     std::shared_ptr<PlanEntry> entry_;
 

@@ -9,9 +9,10 @@
 #include <vector>
 
 #include <cuda_runtime.h>
-#include "cuda_nn/cublaslt_gemm.h"
-#include "cuda_nn/cudnn_frontend_conv.h"
 #include "cuda_nn/inline_check.h"
+#include "cuda_nn/cublaslt_gemm.h"
+#include "cuda_nn/cudnn_legacy_conv.h"
+#include "cuda_nn/cudnn_frontend_conv.h"
 
 using cuda_nn::GemmEpilogue;
 using cuda_nn::Activation;
@@ -21,6 +22,9 @@ using cuda_nn::CudnnFrontendConv;
 using cuda_nn::CudnnFrontendConvTranspose;
 using cuda_nn::ConvConfig;
 using cuda_nn::MemoryFormat;
+
+using cuda_nn::CudnnLegacyConv;
+using cuda_nn::CudnnLegacyConvTranspose;
 
 static void fill_random(std::vector<float>& v, float lo = -1.0f, float hi = 1.0f) {
     std::mt19937 gen(1234);
@@ -378,41 +382,51 @@ static void test_row_major_gemm(cudaStream_t stream, int device_id) {
     std::vector<float> h_B(static_cast<size_t>(K * N));
     std::vector<float> h_C(static_cast<size_t>(M * N));
     std::vector<float> h_D(static_cast<size_t>(M * N));
+    std::vector<float> h_bias(static_cast<size_t>(N));
     std::vector<float> h_ref;
 
     fill_random(h_A, -0.5f, 0.5f);
     fill_random(h_B, -0.5f, 0.5f);
     fill_random(h_C, -0.5f, 0.5f);
+    fill_random(h_bias, -0.5f, 0.5f);
 
     float* d_A = nullptr;
     float* d_B = nullptr;
     float* d_C = nullptr;
     float* d_D = nullptr;
+    float* d_bias = nullptr;
 
     CHECK_CUDA(cudaMalloc(&d_A, h_A.size() * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&d_B, h_B.size() * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&d_C, h_C.size() * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&d_D, h_D.size() * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_bias, h_bias.size() * sizeof(float)));
 
     CHECK_CUDA(cudaMemcpyAsync(d_A, h_A.data(), h_A.size() * sizeof(float), cudaMemcpyHostToDevice, stream));
     CHECK_CUDA(cudaMemcpyAsync(d_B, h_B.data(), h_B.size() * sizeof(float), cudaMemcpyHostToDevice, stream));
     CHECK_CUDA(cudaMemcpyAsync(d_C, h_C.data(), h_C.size() * sizeof(float), cudaMemcpyHostToDevice, stream));
+    CHECK_CUDA(cudaMemcpyAsync(d_bias, h_bias.data(), h_bias.size() * sizeof(float), cudaMemcpyHostToDevice, stream));
 
-    CublasLtRowMajorGemm<float> gemm(M, N, K, device_id, stream, GemmEpilogue::None);
+    CublasLtRowMajorGemm<float> gemm(M, N, K, device_id, stream, GemmEpilogue::Bias);
 
     float alpha = 1.25f;
     float beta = 0.5f;
 
-    gemm.run(d_A, d_B, d_C, d_D, &alpha, &beta);
+    gemm.run(d_A, d_B, d_C, d_D, d_bias, &alpha, &beta);
 
     CHECK_CUDA(cudaMemcpyAsync(h_D.data(), d_D, h_D.size() * sizeof(float), cudaMemcpyDeviceToHost, stream));
     CHECK_CUDA(cudaStreamSynchronize(stream));
 
     gemm_ref_row_major(M, N, K, h_A, h_B, h_C, h_ref, alpha, beta);
+    for (int64_t m = 0; m < M; ++m) {
+        for (int64_t n = 0; n < N; ++n) {
+            h_ref[static_cast<size_t>(m * N + n)] += h_bias[static_cast<size_t>(n)];
+        }
+    }
     check_result("RowMajor GEMM", h_D, h_ref, 2e-3f);
 
     float avg_ms = benchmark_ms(stream, 10, 100, [&] {
-        gemm.run(d_A, d_B, d_C, d_D, &alpha, &beta);
+        gemm.run(d_A, d_B, d_C, d_D, d_bias, &alpha, &beta);
     });
 
     std::cout << "RowMajor GEMM avg_ms = " << avg_ms << "\n";
@@ -646,7 +660,7 @@ static void test_conv_transpose_demo_contiguous(cudaStream_t stream, int device_
     CHECK_CUDA(cudaMemcpyAsync(d_w, h_w.data(), h_w.size() * sizeof(float), cudaMemcpyHostToDevice, stream));
     CHECK_CUDA(cudaMemcpyAsync(d_bias, h_bias.data(), h_bias.size() * sizeof(float), cudaMemcpyHostToDevice, stream));
 
-    CudnnFrontendConvTranspose<float> conv_t(device_id, cfg, stream);
+    CudnnLegacyConvTranspose<float> conv_t(device_id, cfg, stream);
     conv_t.run(d_x, d_w, d_bias, d_y);
 
     CHECK_CUDA(cudaMemcpyAsync(h_y.data(), d_y, h_y.size() * sizeof(float), cudaMemcpyDeviceToHost, stream));
@@ -681,11 +695,11 @@ int main() {
 
         std::cout << "CUDA/cuBLASLt/cuDNN wrapper example\n";
 
-        // test_gemm(stream, device_id);
-        // test_row_major_gemm(stream, device_id);
-        // test_conv_demo(stream, device_id);
-        // test_conv_demo_contiguous(stream, device_id);
-        // test_conv_transpose_demo(stream, device_id);
+        test_gemm(stream, device_id);
+        test_row_major_gemm(stream, device_id);
+        test_conv_demo(stream, device_id);
+        test_conv_demo_contiguous(stream, device_id);
+        test_conv_transpose_demo(stream, device_id);
         test_conv_transpose_demo_contiguous(stream, device_id);
 
         CHECK_CUDA(cudaStreamDestroy(stream));

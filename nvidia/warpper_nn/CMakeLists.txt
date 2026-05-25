@@ -13,6 +13,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
 
+# 如果没找到 CUDNN, 使用 find /home/path -name "cudnn.h" 2>/dev/null 来查找
 if(DEFINED ENV{CONDA_PREFIX})
     set(CONDA_PREFIX_PATH "$ENV{CONDA_PREFIX}")
     message(STATUS "CONDA_PREFIX = ${CONDA_PREFIX_PATH}")
@@ -59,6 +60,7 @@ message(STATUS "CUDNN_LIBRARY     = ${CUDNN_LIBRARY}")
 add_executable(cuda_nn_example
     example.cu
     cuda_nn/cublaslt_gemm.cpp
+    cuda_nn/cudnn_legacy_conv.cpp
     cuda_nn/cudnn_frontend_conv.cpp
 )
 

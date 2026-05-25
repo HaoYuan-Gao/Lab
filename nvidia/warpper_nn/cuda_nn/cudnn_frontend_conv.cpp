@@ -68,7 +68,7 @@ void check_spatial_vector(const std::vector<int64_t>& values, int64_t spatial_nd
 
     for (auto value : values) {
         if (!check(value)) {
-            throw std::runtime_error(std::string(name) + " values is not valid.");
+            throw std::runtime_error(std::string(name) + " values are not valid.");
         }
     }
 }
@@ -76,6 +76,9 @@ void check_spatial_vector(const std::vector<int64_t>& values, int64_t spatial_nd
 std::vector<int64_t> get_strides(const std::vector<int64_t>& dims,
                                  MemoryFormat memory_format) {
     const int64_t ndim = static_cast<int64_t>(dims.size());
+    if (ndim <= 0) {
+        throw std::runtime_error("Tensor dims cannot be empty.");
+    }
     std::vector<int64_t> strides(ndim);
 
     switch (memory_format) {
@@ -194,6 +197,10 @@ std::vector<int64_t> infer_conv_output_shape(const ConvConfig& cfg, ConvKind kin
             default:
                 throw std::runtime_error("Unsupported conv kind.");
         }
+
+        if (y[2 + i] <= 0) {
+            throw std::runtime_error("Inferred convolution output shape is invalid.");
+        }
     }
 
     return y;
@@ -215,13 +222,6 @@ cudnn_frontend::PointwiseMode_t to_frontend_pointwise_mode(Activation activation
 }
 
 }  // namespace
-
-int64_t ConvConfig::spatial_ndim() const {
-    if (x.size() < 3) {
-        throw std::runtime_error("ConvConfig.x must be [N, C, ...spatial].");
-    }
-    return static_cast<int64_t>(x.size()) - 2;
-}
 
 template <typename T, ConvKind Kind>
 struct CudnnFrontendConvBase<T, Kind>::Entry {
@@ -302,8 +302,15 @@ CudnnFrontendConvBase<T, Kind>::get_or_create_entry(int device_id,
 
     build_entry(*entry, entry->handle, cfg);
 
-    std::lock_guard<std::mutex> lock(cache_mutex);
-    cache[key] = entry;
+    {
+        std::lock_guard<std::mutex> lock(cache_mutex);
+        auto it = cache.find(key);
+        if (it != cache.end()) {
+            return it->second;
+        }
+
+        cache.emplace(key, entry);
+    }
     return entry;
 }
 

@@ -191,8 +191,17 @@ CublasLtGemm<T>::get_or_create_plan(int device_id, const CublasLtGemmConfig& cfg
     CHECK_CUDA(cudaSetDevice(device_id));
     build_entry(*entry, cfg);
 
-    std::lock_guard<std::mutex> lock(cache_mutex);
-    cache[key] = entry;
+    // RE-CHECK: The KEY must be unique.
+    {
+        std::lock_guard<std::mutex> lock(cache_mutex);
+        auto it = cache.find(key);
+        if (it != cache.end()) {
+            return it->second;
+        }
+
+        cache.emplace(key, entry);
+    }
+
     return entry;
 }
 

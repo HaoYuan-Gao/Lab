@@ -6,32 +6,31 @@
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
-#include <cudnn_frontend.h>
+#include <cudnn.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <string>
 #include <vector>
 
 namespace cuda_nn {
 
 template <typename T, ConvKind Kind>
-class CudnnFrontendConvBase {
+class CudnnLegacyConvBase {
 public:
-    CudnnFrontendConvBase(int device_id,
-                          const ConvConfig& cfg,
-                          cudaStream_t stream = nullptr);
-    ~CudnnFrontendConvBase();
+    CudnnLegacyConvBase(int device_id,
+                        const ConvConfig& cfg,
+                        cudaStream_t stream = nullptr);
+    ~CudnnLegacyConvBase();
 
     void set_stream(cudaStream_t stream);
     const std::vector<int64_t>& y_shape() const;
     size_t workspace_size() const;
-    
+
     // y = conv(x, w)
     void run(T* x, T* w, T* y);
 
-    // y = conv(x, w) + bias
+    // y = conv(x, w) + bias, optionally followed by activation according to cfg.
     void run(T* x, T* w, T* bias, T* y);
 
 private:
@@ -53,19 +52,19 @@ private:
 };
 
 template <typename T>
-using CudnnFrontendConv = CudnnFrontendConvBase<T, ConvKind::Forward>;
+using CudnnLegacyConv = CudnnLegacyConvBase<T, ConvKind::Forward>;
 
 template <typename T>
-using CudnnFrontendConvTranspose = CudnnFrontendConvBase<T, ConvKind::Transpose>;
+using CudnnLegacyConvTranspose = CudnnLegacyConvBase<T, ConvKind::Transpose>;
 
-extern template class CudnnFrontendConvBase<float, ConvKind::Forward>;
-extern template class CudnnFrontendConvBase<double, ConvKind::Forward>;
-extern template class CudnnFrontendConvBase<__half, ConvKind::Forward>;
-extern template class CudnnFrontendConvBase<__nv_bfloat16, ConvKind::Forward>;
+extern template class CudnnLegacyConvBase<float, ConvKind::Forward>;
+extern template class CudnnLegacyConvBase<double, ConvKind::Forward>;
+extern template class CudnnLegacyConvBase<__half, ConvKind::Forward>;
+extern template class CudnnLegacyConvBase<__nv_bfloat16, ConvKind::Forward>;
 
-extern template class CudnnFrontendConvBase<float, ConvKind::Transpose>;
-extern template class CudnnFrontendConvBase<double, ConvKind::Transpose>;
-extern template class CudnnFrontendConvBase<__half, ConvKind::Transpose>;
-extern template class CudnnFrontendConvBase<__nv_bfloat16, ConvKind::Transpose>;
+extern template class CudnnLegacyConvBase<float, ConvKind::Transpose>;
+extern template class CudnnLegacyConvBase<double, ConvKind::Transpose>;
+extern template class CudnnLegacyConvBase<__half, ConvKind::Transpose>;
+extern template class CudnnLegacyConvBase<__nv_bfloat16, ConvKind::Transpose>;
 
 }  // namespace cuda_nn
