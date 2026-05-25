@@ -1,0 +1,3 @@
+[submodule "nvidia/warpper_nn/cudnn-frontend"]
+	path = nvidia/warpper_nn/cudnn-frontend
+	url = git@github.com:NVIDIA/cudnn-frontend.git
