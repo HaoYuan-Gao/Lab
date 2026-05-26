@@ -216,6 +216,101 @@ static void conv_transpose2d_ref_nchw(
     }
 }
 
+static void conv3d_ref_ncdhw(
+    const ConvConfig& cfg,
+    const std::vector<float>& x,
+    const std::vector<float>& w,
+    const std::vector<float>& bias,
+    std::vector<float>& y
+) {
+    const int64_t N = cfg.x[0];
+    const int64_t C = cfg.x[1];
+    const int64_t D = cfg.x[2];
+    const int64_t H = cfg.x[3];
+    const int64_t W = cfg.x[4];
+    const int64_t K = cfg.w[0];
+    const int64_t T = cfg.w[2];
+    const int64_t R = cfg.w[3];
+    const int64_t S = cfg.w[4];
+
+    const int64_t OD = (D + 2 * cfg.padding[0] - cfg.dilation[0] * (T - 1) - 1) / cfg.stride[0] + 1;
+    const int64_t OH = (H + 2 * cfg.padding[1] - cfg.dilation[1] * (R - 1) - 1) / cfg.stride[1] + 1;
+    const int64_t OW = (W + 2 * cfg.padding[2] - cfg.dilation[2] * (S - 1) - 1) / cfg.stride[2] + 1;
+
+    const auto x_strides = strides_for_format(cfg.x, cfg.memory_format);
+    const auto w_strides = strides_for_format(cfg.w, cfg.memory_format);
+    const auto y_strides = strides_for_format({N, K, OD, OH, OW}, cfg.memory_format);
+
+    y.assign(static_cast<size_t>(N * K * OD * OH * OW), 0.0f);
+
+    for (int64_t n = 0; n < N; ++n) {
+        for (int64_t k = 0; k < K; ++k) {
+            for (int64_t od = 0; od < OD; ++od) {
+                for (int64_t oh = 0; oh < OH; ++oh) {
+                    for (int64_t ow = 0; ow < OW; ++ow) {
+                        float acc = cfg.with_bias ? bias[static_cast<size_t>(k)] : 0.0f;
+
+                        for (int64_t c = 0; c < C; ++c) {
+                            for (int64_t t = 0; t < T; ++t) {
+                                const int64_t id = od * cfg.stride[0] - cfg.padding[0] + t * cfg.dilation[0];
+                                if (id < 0 || id >= D) {
+                                    continue;
+                                }
+
+                                for (int64_t r = 0; r < R; ++r) {
+                                    const int64_t ih = oh * cfg.stride[1] - cfg.padding[1] + r * cfg.dilation[1];
+                                    if (ih < 0 || ih >= H) {
+                                        continue;
+                                    }
+
+                                    for (int64_t s = 0; s < S; ++s) {
+                                        const int64_t iw = ow * cfg.stride[2] - cfg.padding[2] + s * cfg.dilation[2];
+                                        if (iw < 0 || iw >= W) {
+                                            continue;
+                                        }
+
+                                        const size_t x_off = static_cast<size_t>(
+                                            n * x_strides[0] +
+                                            c * x_strides[1] +
+                                            id * x_strides[2] +
+                                            ih * x_strides[3] +
+                                            iw * x_strides[4]
+                                        );
+
+                                        const size_t w_off = static_cast<size_t>(
+                                            k * w_strides[0] +
+                                            c * w_strides[1] +
+                                            t * w_strides[2] +
+                                            r * w_strides[3] +
+                                            s * w_strides[4]
+                                        );
+
+                                        acc += x[x_off] * w[w_off];
+                                    }
+                                }
+                            }
+                        }
+
+                        if (cfg.activation == Activation::Relu && acc < 0.0f) {
+                            acc = 0.0f;
+                        }
+
+                        const size_t y_off = static_cast<size_t>(
+                            n * y_strides[0] +
+                            k * y_strides[1] +
+                            od * y_strides[2] +
+                            oh * y_strides[3] +
+                            ow * y_strides[4]
+                        );
+
+                        y[y_off] = acc;
+                    }
+                }
+            }
+        }
+    }
+}
+
 static float benchmark_ms(
     cudaStream_t stream,
     int warmup,
@@ -685,6 +780,167 @@ static void test_conv_transpose_demo_contiguous(cudaStream_t stream, int device_
     CHECK_CUDA(cudaFree(d_y));
 }
 
+static void test_legacy_conv2d_nchw(cudaStream_t stream, int device_id) {
+    ConvConfig cfg;
+    cfg.x = {2, 8, 16, 16};
+    cfg.w = {16, 8, 3, 3};
+    cfg.padding = {1, 1};
+    cfg.stride = {1, 1};
+    cfg.dilation = {1, 1};
+    cfg.groups = 1;
+    cfg.memory_format = MemoryFormat::Contiguous;
+    cfg.with_bias = true;
+    cfg.activation = Activation::Relu;
+
+    const std::vector<int64_t> y_shape = {2, 16, 16, 16};
+
+    std::vector<float> h_x(volume(cfg.x));
+    std::vector<float> h_w(volume(cfg.w));
+    std::vector<float> h_bias(static_cast<size_t>(cfg.w[0]));
+    std::vector<float> h_y(volume(y_shape));
+    std::vector<float> h_ref;
+
+    fill_random(h_x, -0.5f, 0.5f);
+    fill_random(h_w, -0.5f, 0.5f);
+    fill_random(h_bias, -0.1f, 0.1f);
+
+    float* d_x = nullptr;
+    float* d_w = nullptr;
+    float* d_bias = nullptr;
+    float* d_y = nullptr;
+
+    CHECK_CUDA(cudaMalloc(&d_x, h_x.size() * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_w, h_w.size() * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_bias, h_bias.size() * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_y, h_y.size() * sizeof(float)));
+
+    CHECK_CUDA(cudaMemcpyAsync(d_x, h_x.data(), h_x.size() * sizeof(float), cudaMemcpyHostToDevice, stream));
+    CHECK_CUDA(cudaMemcpyAsync(d_w, h_w.data(), h_w.size() * sizeof(float), cudaMemcpyHostToDevice, stream));
+    CHECK_CUDA(cudaMemcpyAsync(d_bias, h_bias.data(), h_bias.size() * sizeof(float), cudaMemcpyHostToDevice, stream));
+
+    CudnnLegacyConv<float> conv(device_id, cfg, stream);
+    conv.run(d_x, d_w, d_bias, d_y);
+
+    CHECK_CUDA(cudaMemcpyAsync(h_y.data(), d_y, h_y.size() * sizeof(float), cudaMemcpyDeviceToHost, stream));
+    CHECK_CUDA(cudaStreamSynchronize(stream));
+
+    conv2d_ref_nchw(cfg, h_x, h_w, h_bias, h_ref);
+    check_result("Legacy Conv2D NCHW bias relu", h_y, h_ref, 2e-3f);
+
+    CHECK_CUDA(cudaFree(d_x));
+    CHECK_CUDA(cudaFree(d_w));
+    CHECK_CUDA(cudaFree(d_bias));
+    CHECK_CUDA(cudaFree(d_y));
+}
+
+static void test_legacy_conv2d_nhwc_no_bias(cudaStream_t stream, int device_id) {
+    ConvConfig cfg;
+    cfg.x = {2, 8, 15, 17};
+    cfg.w = {16, 8, 3, 3};
+    cfg.padding = {1, 1};
+    cfg.stride = {2, 2};
+    cfg.dilation = {1, 1};
+    cfg.groups = 1;
+    cfg.memory_format = MemoryFormat::ChannelsLast;
+    cfg.with_bias = false;
+    cfg.activation = Activation::None;
+
+    const std::vector<int64_t> y_shape = {2, 16, 8, 9};
+
+    std::vector<float> h_x(volume(cfg.x));
+    std::vector<float> h_w(volume(cfg.w));
+    std::vector<float> h_bias(static_cast<size_t>(cfg.w[0]), 0.0f);
+    std::vector<float> h_y(volume(y_shape));
+    std::vector<float> h_ref;
+
+    fill_random(h_x, -0.5f, 0.5f);
+    fill_random(h_w, -0.5f, 0.5f);
+
+    float* d_x = nullptr;
+    float* d_w = nullptr;
+    float* d_y = nullptr;
+
+    CHECK_CUDA(cudaMalloc(&d_x, h_x.size() * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_w, h_w.size() * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_y, h_y.size() * sizeof(float)));
+
+    CHECK_CUDA(cudaMemcpyAsync(d_x, h_x.data(), h_x.size() * sizeof(float), cudaMemcpyHostToDevice, stream));
+    CHECK_CUDA(cudaMemcpyAsync(d_w, h_w.data(), h_w.size() * sizeof(float), cudaMemcpyHostToDevice, stream));
+
+    CudnnLegacyConv<float> conv(device_id, cfg, stream);
+    conv.run(d_x, d_w, nullptr, d_y);
+
+    CHECK_CUDA(cudaMemcpyAsync(h_y.data(), d_y, h_y.size() * sizeof(float), cudaMemcpyDeviceToHost, stream));
+    CHECK_CUDA(cudaStreamSynchronize(stream));
+
+    conv2d_ref_nchw(cfg, h_x, h_w, h_bias, h_ref);
+    check_result("Legacy Conv2D NHWC no bias", h_y, h_ref, 2e-3f);
+
+    CHECK_CUDA(cudaFree(d_x));
+    CHECK_CUDA(cudaFree(d_w));
+    CHECK_CUDA(cudaFree(d_y));
+}
+
+static void test_legacy_conv3d(
+    cudaStream_t stream,
+    int device_id,
+    MemoryFormat memory_format,
+    const std::string& name
+) {
+    ConvConfig cfg;
+    cfg.x = {2, 4, 8, 9, 10};
+    cfg.w = {6, 4, 3, 3, 3};
+    cfg.padding = {1, 1, 1};
+    cfg.stride = {1, 1, 1};
+    cfg.dilation = {1, 1, 1};
+    cfg.groups = 1;
+    cfg.memory_format = memory_format;
+    cfg.with_bias = true;
+    cfg.activation = Activation::Relu;
+
+    const std::vector<int64_t> y_shape = {2, 6, 8, 9, 10};
+
+    std::vector<float> h_x(volume(cfg.x));
+    std::vector<float> h_w(volume(cfg.w));
+    std::vector<float> h_bias(static_cast<size_t>(cfg.w[0]));
+    std::vector<float> h_y(volume(y_shape));
+    std::vector<float> h_ref;
+
+    fill_random(h_x, -0.5f, 0.5f);
+    fill_random(h_w, -0.5f, 0.5f);
+    fill_random(h_bias, -0.1f, 0.1f);
+
+    float* d_x = nullptr;
+    float* d_w = nullptr;
+    float* d_bias = nullptr;
+    float* d_y = nullptr;
+
+    CHECK_CUDA(cudaMalloc(&d_x, h_x.size() * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_w, h_w.size() * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_bias, h_bias.size() * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_y, h_y.size() * sizeof(float)));
+
+    CHECK_CUDA(cudaMemcpyAsync(d_x, h_x.data(), h_x.size() * sizeof(float), cudaMemcpyHostToDevice, stream));
+    CHECK_CUDA(cudaMemcpyAsync(d_w, h_w.data(), h_w.size() * sizeof(float), cudaMemcpyHostToDevice, stream));
+    CHECK_CUDA(cudaMemcpyAsync(d_bias, h_bias.data(), h_bias.size() * sizeof(float), cudaMemcpyHostToDevice, stream));
+
+    CudnnLegacyConv<float> conv(device_id, cfg, stream);
+    conv.run(d_x, d_w, d_bias, d_y);
+
+    CHECK_CUDA(cudaMemcpyAsync(h_y.data(), d_y, h_y.size() * sizeof(float), cudaMemcpyDeviceToHost, stream));
+    CHECK_CUDA(cudaStreamSynchronize(stream));
+
+    conv3d_ref_ncdhw(cfg, h_x, h_w, h_bias, h_ref);
+    check_result(name, h_y, h_ref, 2e-3f);
+
+    std::cout << name << " workspace_bytes = " << conv.workspace_size() << "\n";
+
+    CHECK_CUDA(cudaFree(d_x));
+    CHECK_CUDA(cudaFree(d_w));
+    CHECK_CUDA(cudaFree(d_bias));
+    CHECK_CUDA(cudaFree(d_y));
+}
+
 int main() {
     try {
         int device_id = 0;
@@ -701,6 +957,24 @@ int main() {
         test_conv_demo_contiguous(stream, device_id);
         test_conv_transpose_demo(stream, device_id);
         test_conv_transpose_demo_contiguous(stream, device_id);
+
+        test_legacy_conv2d_nchw(stream, device_id);
+        test_legacy_conv2d_nhwc_no_bias(stream, device_id);
+
+        test_legacy_conv3d(
+            stream,
+            device_id,
+            MemoryFormat::Contiguous,
+            "Legacy Conv3D NCDHW bias relu"
+        );
+
+        test_legacy_conv3d(
+            stream,
+            device_id,
+            MemoryFormat::ChannelsLast,
+            "Legacy Conv3D NDHWC bias relu"
+        );
+
 
         CHECK_CUDA(cudaStreamDestroy(stream));
 
