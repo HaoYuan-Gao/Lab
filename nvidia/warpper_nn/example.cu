@@ -941,6 +941,79 @@ static void test_legacy_conv3d(
     CHECK_CUDA(cudaFree(d_y));
 }
 
+static void test_row_major_gemm_half(cudaStream_t stream, int device_id) {
+    const int64_t M = 128;
+    const int64_t N = 64;
+    const int64_t K = 256;
+
+    std::vector<float> h_A_f32(static_cast<size_t>(M * K));
+    std::vector<float> h_B_f32(static_cast<size_t>(K * N));
+    std::vector<float> h_C_f32(static_cast<size_t>(M * N));
+    std::vector<float> h_D_f32(static_cast<size_t>(M * N));
+    std::vector<float> h_ref;
+
+    fill_random(h_A_f32, -0.5f, 0.5f);
+    fill_random(h_B_f32, -0.5f, 0.5f);
+    fill_random(h_C_f32, -0.5f, 0.5f);
+
+    std::vector<__half> h_A(static_cast<size_t>(M * K));
+    std::vector<__half> h_B(static_cast<size_t>(K * N));
+    std::vector<__half> h_C(static_cast<size_t>(M * N));
+    std::vector<__half> h_D(static_cast<size_t>(M * N));
+
+    for (size_t i = 0; i < h_A.size(); ++i) {
+        h_A[i] = __float2half(h_A_f32[i]);
+        h_A_f32[i] = __half2float(h_A[i]);
+    }
+
+    for (size_t i = 0; i < h_B.size(); ++i) {
+        h_B[i] = __float2half(h_B_f32[i]);
+        h_B_f32[i] = __half2float(h_B[i]);
+    }
+
+    for (size_t i = 0; i < h_C.size(); ++i) {
+        h_C[i] = __float2half(h_C_f32[i]);
+        h_C_f32[i] = __half2float(h_C[i]);
+    }
+
+    __half* d_A = nullptr;
+    __half* d_B = nullptr;
+    __half* d_C = nullptr;
+    __half* d_D = nullptr;
+
+    CHECK_CUDA(cudaMalloc(&d_A, h_A.size() * sizeof(__half)));
+    CHECK_CUDA(cudaMalloc(&d_B, h_B.size() * sizeof(__half)));
+    CHECK_CUDA(cudaMalloc(&d_C, h_C.size() * sizeof(__half)));
+    CHECK_CUDA(cudaMalloc(&d_D, h_D.size() * sizeof(__half)));
+
+    CHECK_CUDA(cudaMemcpyAsync(d_A, h_A.data(), h_A.size() * sizeof(__half), cudaMemcpyHostToDevice, stream));
+    CHECK_CUDA(cudaMemcpyAsync(d_B, h_B.data(), h_B.size() * sizeof(__half), cudaMemcpyHostToDevice, stream));
+    CHECK_CUDA(cudaMemcpyAsync(d_C, h_C.data(), h_C.size() * sizeof(__half), cudaMemcpyHostToDevice, stream));
+
+    CublasLtRowMajorGemm<__half> gemm(M, N, K, device_id, stream, GemmEpilogue::None);
+
+    float alpha = 1.25f;
+    float beta = 0.5f;
+
+    gemm.run(d_A, d_B, d_C, d_D, &alpha, &beta);
+
+    CHECK_CUDA(cudaMemcpyAsync(h_D.data(), d_D, h_D.size() * sizeof(__half), cudaMemcpyDeviceToHost, stream));
+    CHECK_CUDA(cudaStreamSynchronize(stream));
+
+    for (size_t i = 0; i < h_D.size(); ++i) {
+        h_D_f32[i] = __half2float(h_D[i]);
+    }
+
+    gemm_ref_row_major(M, N, K, h_A_f32, h_B_f32, h_C_f32, h_ref, alpha, beta);
+
+    check_result("RowMajor GEMM half", h_D_f32, h_ref, 2e-1f);
+
+    CHECK_CUDA(cudaFree(d_A));
+    CHECK_CUDA(cudaFree(d_B));
+    CHECK_CUDA(cudaFree(d_C));
+    CHECK_CUDA(cudaFree(d_D));
+}
+
 int main() {
     try {
         int device_id = 0;
@@ -974,6 +1047,8 @@ int main() {
             MemoryFormat::ChannelsLast,
             "Legacy Conv3D NDHWC bias relu"
         );
+
+        test_row_major_gemm_half(stream, device_id);
 
 
         CHECK_CUDA(cudaStreamDestroy(stream));
