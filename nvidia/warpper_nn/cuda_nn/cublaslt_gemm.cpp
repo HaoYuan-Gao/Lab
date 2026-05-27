@@ -1,5 +1,6 @@
 #include "cuda_nn/cublaslt_gemm.h"
 
+#include "cuda_nn/device_guard.h"
 #include "cuda_nn/inline_check.h"
 #include "cuda_nn/gpu_handle_pool.h"
 #include "cuda_nn/gpu_workspace_pool.h"
@@ -54,6 +55,7 @@ std::size_t gemm_cache_key_hash(const CublasLtGemmConfig& cfg,
     hash_combine(seed, cfg.m);
     hash_combine(seed, cfg.n);
     hash_combine(seed, cfg.k);
+    hash_combine(seed, static_cast<int>(cfg.epilogue));
     return seed;
 }
 
@@ -188,7 +190,6 @@ CublasLtGemm<T>::get_or_create_plan(int device_id, const CublasLtGemmConfig& cfg
     auto lease = CublasLtHandlePool::instance().acquire(device_id);
     entry->handle = lease.get();
 
-    CHECK_CUDA(cudaSetDevice(device_id));
     build_entry(*entry, cfg);
 
     // RE-CHECK: The KEY must be unique.
@@ -207,8 +208,6 @@ CublasLtGemm<T>::get_or_create_plan(int device_id, const CublasLtGemmConfig& cfg
 
 template <typename T>
 void CublasLtGemm<T>::build_entry(PlanEntry& e, const CublasLtGemmConfig& cfg) {
-    CHECK_CUBLASLT(cublasLtCreate(&e.handle));
-
     CHECK_CUBLASLT(cublasLtMatmulDescCreate(
         &e.matmul_desc,
         Traits::cublas_compute_type,
@@ -284,6 +283,14 @@ void CublasLtGemm<T>::build_entry(PlanEntry& e, const CublasLtGemmConfig& cfg) {
         &order,
         sizeof(order)));
 
+    cublasLtEpilogue_t epilogue = to_cublas_epilogue(cfg.epilogue);
+    CHECK_CUBLASLT(cublasLtMatmulDescSetAttribute(
+        e.matmul_desc,
+        CUBLASLT_MATMUL_DESC_EPILOGUE,
+        &epilogue,
+        sizeof(epilogue)
+    ));
+
     select_algo(e, cfg);
 }
 
@@ -352,15 +359,7 @@ void CublasLtGemm<T>::matmul(const T* A,
     auto lease = CublasLtHandlePool::instance().acquire_specific(device_id_, entry_->handle);
     cublasLtHandle_t handle = lease.get();
 
-    CHECK_CUDA(cudaSetDevice(device_id_));
-
-    cublasLtEpilogue_t epilogue = to_cublas_epilogue(cfg_.epilogue);
-    CHECK_CUBLASLT(cublasLtMatmulDescSetAttribute(
-        entry_->matmul_desc,
-        CUBLASLT_MATMUL_DESC_EPILOGUE,
-        &epilogue,
-        sizeof(epilogue)
-    ));
+    DeviceGuard device_guard(device_id_);
 
     if (bias != nullptr) {
         set_bias_pointer(bias);

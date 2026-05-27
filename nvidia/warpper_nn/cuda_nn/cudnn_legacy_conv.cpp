@@ -3,8 +3,8 @@
 #include "cuda_nn/gpu_workspace_pool.h"
 #include "cuda_nn/inline_check.h"
 #include "cuda_nn/type_traits.h"
+#include "cuda_nn/device_guard.h"
 
-#include <algorithm>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -304,6 +304,8 @@ struct CudnnLegacyConvBase<T, Kind>::Entry {
 
     std::vector<int64_t> y_shape;
     size_t workspace_size = 0;
+    // Borrowed from CudnnHandlePool. Do not destroy here.
+    cudnnHandle_t handle = nullptr;
 
     cudnnConvolutionFwdAlgo_t fwd_algo = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
     cudnnConvolutionBwdDataAlgo_t bwd_data_algo = CUDNN_CONVOLUTION_BWD_DATA_ALGO_1;
@@ -369,7 +371,8 @@ CudnnLegacyConvBase<T, Kind>::get_or_create_entry(int device_id,
     // Algorithm selection and workspace-size query require a concrete cuDNN handle.
     // The handle itself is not stored in Entry; execution borrows a handle from the pool.
     auto lease = CudnnHandlePool::instance().acquire(device_id);
-    build_entry(*entry, lease.get(), cfg);
+    entry->handle = lease.get();
+    build_entry(*entry, entry->handle, cfg);
 
     {
         std::lock_guard<std::mutex> lock(cache_mutex);
@@ -524,11 +527,10 @@ void CudnnLegacyConvBase<T, Kind>::execute(T* x, T* w, T* bias, T* y) {
         throw std::runtime_error("Conv was built without bias, but run() received a bias pointer.");
     }
 
-    CHECK_CUDA(cudaSetDevice(device_id_));
-
-    auto handle_lease = CudnnHandlePool::instance().acquire(device_id_);
+    auto handle_lease = CudnnHandlePool::instance().acquire_specific(device_id_, entry_->handle);
     cudnnHandle_t handle = handle_lease.get();
 
+    DeviceGuard device_guard(device_id_);
     CHECK_CUDNN(cudnnSetStream(handle, stream_));
 
     auto workspace_lease = DeviceWorkspacePool::instance().acquire(device_id_, entry_->workspace_size);

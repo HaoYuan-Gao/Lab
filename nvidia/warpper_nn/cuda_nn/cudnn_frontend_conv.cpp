@@ -2,6 +2,7 @@
 #include "cuda_nn/inline_check.h"
 #include "cuda_nn/gpu_handle_pool.h"
 #include "cuda_nn/gpu_workspace_pool.h"
+#include "cuda_nn/device_guard.h"
 
 #include <functional>
 #include <stdexcept>
@@ -433,7 +434,7 @@ void CudnnFrontendConvBase<T, Kind>::execute(T* x, T* w, T* bias, T* y) {
     auto lease = CudnnHandlePool::instance().acquire_specific(device_id_, entry_->handle);
     cudnnHandle_t handle = lease.get();
 
-    CHECK_CUDA(cudaSetDevice(device_id_));
+    DeviceGuard device_guard(device_id_);
     CHECK_CUDNN(cudnnSetStream(handle, stream_));
 
     if (cfg_.with_bias && bias == nullptr) {
