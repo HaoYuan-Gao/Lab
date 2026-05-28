@@ -1,3 +1,4 @@
+// nvcc graph_IF_0.cu -O3 --use_fast_math -std=c++17 -lcudart -o test
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
 
@@ -93,7 +94,7 @@ __global__ void InferStdAndBiasKernel(
   error_bias[c] = curand_normal(&state) * sigma_bias;
 }
 
-template <typename T>
+template <typename T, bool EnablePost>
 __global__ void ApplyLinearFusedKernel2D(
     const float* __restrict__ infer_std,
     const float* __restrict__ error_bias,
@@ -116,19 +117,23 @@ __global__ void ApplyLinearFusedKernel2D(
   curand_init(seed, idx, 0, &state);
 
   float rnd = curand_normal(&state);
-//   float g = g_value[g_count == 1 ? 0 : c];
-
-//   float v = static_cast<float>(y[idx]);
   float delta = fmaf(rnd, infer_std[c], error_bias[c]);
 
-//   v = v / g + delta;
-//   v = fminf(127.f, fmaxf(-128.f, v));
-//   v = nearbyintf(v);
+  if constexpr (EnablePost) {
+    float g = g_value[g_count == 1 ? 0 : c];
 
-  y[idx] = static_cast<T>(delta);
+    float v = static_cast<float>(y[idx]);
+    v = v / g + delta;
+    v = fminf(127.f, fmaxf(-128.f, v));
+    v = nearbyintf(v);
+
+    y[idx] = static_cast<T>(v);
+  } else {
+    y[idx] = static_cast<T>(delta);
+  }
 }
 
-template <typename T>
+template <typename T, bool EnablePost>
 __global__ void ApplyConvFusedKernel(
     const float* __restrict__ infer_std,
     const float* __restrict__ error_bias,
@@ -153,19 +158,23 @@ __global__ void ApplyConvFusedKernel(
   curand_init(seed, idx, 0, &state);
 
   float rnd = curand_normal(&state);
-  float g = g_value[g_count == 1 ? 0 : c];
-
-  float v = static_cast<float>(y[idx]);
   float delta = fmaf(rnd, infer_std[c], error_bias[c]);
 
-  v = v / g + delta;
-  v = fminf(127.f, fmaxf(-128.f, v));
-  v = nearbyintf(v);
+  if constexpr (EnablePost) {
+    float g = g_value[g_count == 1 ? 0 : c];
 
-  y[idx] = static_cast<T>(v);
+    float v = static_cast<float>(y[idx]);
+    v = v / g + delta;
+    v = fminf(127.f, fmaxf(-128.f, v));
+    v = nearbyintf(v);
+
+    y[idx] = static_cast<T>(v);
+  } else {
+    y[idx] = static_cast<T>(delta);
+  }
 }
 
-template <typename T>
+template <typename T, bool EnablePost>
 class NoiseGraph {
  public:
   static size_t WorkspaceBytes(int64_t Cout) {
@@ -319,7 +328,8 @@ class NoiseGraph {
       apply_args_[7] = &noise_seed_;
 
       apply_params_.func =
-          reinterpret_cast<void*>(ApplyLinearFusedKernel2D<T>);
+          reinterpret_cast<void*>(
+              ApplyLinearFusedKernel2D<T, EnablePost>);
 
       apply_params_.gridDim = dim3(
           static_cast<unsigned int>((Cout_ + threads_ - 1) / threads_),
@@ -339,7 +349,8 @@ class NoiseGraph {
       apply_args_[8] = &noise_seed_;
 
       apply_params_.func =
-          reinterpret_cast<void*>(ApplyConvFusedKernel<T>);
+          reinterpret_cast<void*>(
+              ApplyConvFusedKernel<T, EnablePost>);
 
       apply_params_.gridDim = dim3(
           static_cast<unsigned int>((HW_ + threads_ - 1) / threads_),
@@ -407,7 +418,7 @@ class NoiseGraph {
   unsigned int threads_ = 256;
 };
 
-template <typename T>
+template <typename T, bool EnablePost>
 void run_case(const char* name, OperatorType op) {
   constexpr int64_t N = 32;
   constexpr int64_t C = 256;
@@ -442,7 +453,7 @@ void run_case(const char* name, OperatorType op) {
   CUDA_CHECK(cudaMalloc(&d_g, C * sizeof(float)));
   CUDA_CHECK(cudaMalloc(
       &d_workspace,
-      NoiseGraph<T>::WorkspaceBytes(C)));
+      NoiseGraph<T, EnablePost>::WorkspaceBytes(C)));
 
   CUDA_CHECK(cudaMemcpy(
       d_y,
@@ -465,7 +476,7 @@ void run_case(const char* name, OperatorType op) {
   cudaStream_t stream;
   CUDA_CHECK(cudaStreamCreate(&stream));
 
-  NoiseGraph<T> graph;
+  NoiseGraph<T, EnablePost> graph;
 
   graph.Build(
       d_y_std,
@@ -476,13 +487,13 @@ void run_case(const char* name, OperatorType op) {
       numel,
       C,
       HW,
-      C,                 // g_count: C or 1
-      1.0f,              // a
-      0.7f,              // b
-      0.01f,             // epsilon
-      1.0f,              // x0
-      1.0f,              // noise_scale
-      0.02f,             // sigma_bias
+      C,
+      1.0f,
+      0.7f,
+      0.01f,
+      1.0f,
+      1.0f,
+      0.02f,
       NoiseFunc::Sech,
       op,
       1234);
@@ -519,7 +530,7 @@ void run_case(const char* name, OperatorType op) {
   double elems_per_sec =
       static_cast<double>(numel) / (avg_ms * 1e-3);
 
-  printf("[%s]\n", name);
+  printf("[%s | EnablePost=%d]\n", name, EnablePost ? 1 : 0);
   printf("numel: %lld\n", static_cast<long long>(numel));
   printf("avg time: %.6f ms\n", avg_ms);
   printf("throughput: %.3f Gelem/s\n\n", elems_per_sec / 1e9);
@@ -537,7 +548,11 @@ void run_case(const char* name, OperatorType op) {
 }
 
 int main() {
-  run_case<float>("linear fused graph", OperatorType::Linear);
-  run_case<float>("conv fused graph", OperatorType::Conv);
+  run_case<float, false>("linear fused graph", OperatorType::Linear);
+  run_case<float, true>("linear fused graph", OperatorType::Linear);
+
+  run_case<float, false>("conv fused graph", OperatorType::Conv);
+  run_case<float, true>("conv fused graph", OperatorType::Conv);
+
   return 0;
 }
